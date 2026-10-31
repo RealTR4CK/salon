@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Смена салона</title>
+<style>
+:root{--bg:#f6f1e4;--card:#fffdf7;--tx:#14312a;--mut:#6d7f77;--ac:#0b5d47;--onac:#f0d98c;--ac2:#efe8d0;--sect:#0b5d47;--bd:#e3d8b8;--gold:#b8913a;--ok:#0b5d47}
+@media(prefers-color-scheme:dark){:root{--bg:#07211b;--card:#0d3128;--tx:#f3ecd6;--mut:#9db3a9;--ac:#137a5e;--onac:#f5e2a1;--ac2:#123d32;--sect:#d9b863;--bd:#245043;--gold:#d9b863;--ok:#7fd6b0}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:560px;margin:0 auto;padding:14px}
+h1{font:600 24px/1.2 Georgia,"Times New Roman",serif;color:var(--ac);margin:6px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--gold)}
+h1::before{content:"\2726  ";color:var(--gold)}
+h2{font:600 18px Georgia,serif;color:var(--ac);margin:18px 0 8px}
+.card{background:var(--card);border:1px solid var(--bd);border-top:3px solid var(--gold);border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 2px 8px rgba(11,93,71,.07)}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+input,select{width:100%;font:inherit;padding:12px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx)}
+input:focus{outline:2px solid var(--gold);border-color:var(--gold)}
+button{font:inherit;border:1px solid var(--gold);border-radius:12px;padding:13px 16px;background:var(--ac);color:var(--onac);font-weight:600;width:100%;margin-top:12px;letter-spacing:.3px}
+button.sec{background:var(--ac2);color:var(--sect)}button.sm{width:auto;padding:6px 10px;margin:0;font-size:14px}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{flex:1;text-align:center;padding:11px 6px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);cursor:pointer;font-size:15px;min-width:90px}
+.chip.on{background:var(--ac);color:var(--onac);border-color:var(--gold);font-weight:600}
+.v{display:flex;justify-content:space-between;gap:8px;padding:9px 0;border-top:1px solid var(--bd);font-size:15px}
+.v:first-child{border-top:0}.mut{color:var(--mut);font-size:13px}
+.big{font:600 20px Georgia,serif;color:var(--ac);margin-bottom:4px}
+.tot{display:flex;justify-content:space-between;font-weight:700;padding-top:8px;border-top:2px solid var(--gold);margin-top:6px}
+.ok{color:var(--ok)}a{color:var(--gold)}
+.nav{display:flex;gap:8px}.nav button{margin-top:12px}
+@media print{.noprint{display:none!important}body{background:#fff;color:#000}.card{border-color:#999;break-inside:avoid;box-shadow:none}}
+</style>
+</head>
+<body><main id="app"></main>
+<script>
+const CUR='₽', ADMIN_FIX=2500, ADMIN_PCT=0.05;
+const RATES={'Стрижка':0.5,'Маникюр':0.6,'Брови':0.4}; // доля мастера
+const PAY={card:'Безналичная оплата',cash:'Наличные'};
+const pl=p=>p==='cash'?'Наличные':'Безналичная оплата';
+const $=s=>document.querySelector(s);
+const money=n=>(Math.round(n*100)/100).toLocaleString('ru-RU')+' '+CUR;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}};
+const save=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+let shift=load('shift',null), history=load('history',[]), view=shift?'shift':'setup';
+let form={service:'Стрижка',pay:'card'}, setupNames=['',''], reportOf=null;
+
+function calc(s){
+  const ms=s.masters.map(name=>{
+    const vs=s.visits.filter(v=>v.master===name);
+    const total=vs.reduce((a,v)=>a+v.amount,0);
+    const salary=vs.reduce((a,v)=>a+v.amount*RATES[v.service],0);
+        return {name,vs,total,salary,salon:total-salary};
+  });
+  const total=ms.reduce((a,m)=>a+m.total,0), salon=ms.reduce((a,m)=>a+m.salon,0);
+  const cash=s.visits.filter(v=>v.pay==='cash').reduce((a,v)=>a+v.amount,0);
+  return {ms,total,cash,cashless:total-cash,salon,admin:ADMIN_FIX+ADMIN_PCT*salon,owner:salon-(ADMIN_FIX+ADMIN_PCT*salon)};
+}
+function nowTime(){return new Date().toTimeString().slice(0,5)}
+function render(){
+  const a=$('#app');
+  if(view==='setup')a.innerHTML=setupHTML();
+  else if(view==='shift')a.innerHTML=shiftHTML();
+  else if(view==='report')a.innerHTML=reportHTML(reportOf,reportOf.closed);
+  else a.innerHTML=historyHTML();
+}
+function setupHTML(){
+  return `<h1>Новая смена</h1><div class="card"><div class="mut">Имена мастеров, работающих сегодня</div>
+  ${setupNames.map((n,i)=>`<label>Мастер ${i+1}</label><div class="row"><input value="${esc(n)}" oninput="setupNames[${i}]=this.value" placeholder="Имя">${setupNames.length>1?`<button class="sec sm" style="flex:0 0 auto" onclick="setupNames.splice(${i},1);render()">✕</button>`:''}</div>`).join('')}
+  <button class="sec" onclick="setupNames.push('');render()">+ Добавить мастера</button></div>
+  <button onclick="startShift()">Начать смену</button>
+  ${history.length?`<button class="sec" onclick="view='history';render()">История смен</button>`:''}`;
+}
+function startShift(){
+  const names=[...new Set(setupNames.map(s=>s.trim()).filter(Boolean))];
+  if(!names.length)return alert('Укажите хотя бы одного мастера');
+  shift={date:new Date().toISOString().slice(0,10),masters:names,visits:[]};
+  form={service:'Стрижка',pay:'card',master:names[0]};save('shift',shift);view='shift';render();
+}
+function shiftHTML(){
+  if(!form.master||!shift.masters.includes(form.master))form.master=shift.masters[0];
+  const c=calc(shift);
+  return `<h1>Смена ${shift.date.split('-').reverse().join('.')}</h1>
+  <div class="card"><div class="mut">Мастер</div><div class="chips">${shift.masters.map(m=>`<div class="chip ${form.master===m?'on':''}" onclick="form.master='${esc(m).replace(/'/g,"\\'")}';keep();render()">${esc(m)}</div>`).join('')}</div>
+  <label>Услуга</label><div class="chips">${Object.keys(RATES).map(s=>`<div class="chip ${form.service===s?'on':''}" onclick="form.service='${s}';keep();render()">${s}</div>`).join('')}</div>
+  <div class="row"><div><label>Клиент</label><input id="cl" placeholder="Имя" value="${esc(form.client||'')}"></div><div><label>Время</label><input id="tm" type="time" value="${form.time||nowTime()}"></div></div>
+  <label>Сумма, ${CUR}</label><input id="am" type="number" inputmode="decimal" placeholder="0" value="${form.amount||''}">
+  <label>Способ оплаты</label><div class="chips">${Object.entries(PAY).map(([k,v])=>`<div class="chip ${form.pay===k?'on':''}" onclick="form.pay='${k}';keep();render()">${v}</div>`).join('')}</div>
+  <button onclick="addVisit()">Добавить запись</button></div>
+  <h2>Записи за смену (${shift.visits.length}) · ${money(c.total)}</h2>
+  <div class="card">${shift.visits.length?[...shift.visits].reverse().map(v=>`<div class="v"><div><b>${esc(v.client||'Клиент')}</b> · ${esc(v.master)}<div class="mut">${v.time} · ${v.service} · ${pl(v.pay)}</div></div><div style="text-align:right"><b>${money(v.amount)}</b><br><a class="mut" href="#" onclick="delVisit(${v.id});return false">удалить</a></div></div>`).join(''):'<div class="mut">Пока пусто</div>'}</div>
+  <div class="nav"><button class="sec" onclick="addMaster()">+ Мастер</button><button onclick="finish()">Завершить смену</button></div>`;
+}
+function keep(){const g=id=>document.getElementById(id);if(g('cl')){form.client=g('cl').value;form.time=g('tm').value;form.amount=g('am').value}}
+function addVisit(){
+  keep();const amount=parseFloat(String(form.amount).replace(',','.'));
+  if(!(amount>0))return alert('Укажите сумму');
+  shift.visits.push({id:Date.now(),master:form.master,client:(form.client||'').trim(),time:form.time||nowTime(),service:form.service,amount,pay:form.pay});
+  form.client='';form.amount='';form.time='';save('shift',shift);render();
+}
+function delVisit(id){if(confirm('Удалить запись?')){shift.visits=shift.visits.filter(v=>v.id!==id);save('shift',shift);render()}}
+function addMaster(){const n=(prompt('Имя мастера')||'').trim();if(n&&!shift.masters.includes(n)){shift.masters.push(n);save('shift',shift);render()}}
+function finish(){
+  if(!shift.visits.length&&!confirm('Записей нет. Завершить смену?'))return;
+  shift.masters=shift.masters.filter(m=>shift.visits.some(v=>v.master===m)||confirm('У мастера «'+m+'» нет записей. Оставить в отчёте?'));
+  reportOf={...shift,closed:true};history.unshift(reportOf);save('history',history);
+  shift=null;localStorage.removeItem('shift');view='report';render();
+}
+function reportHTML(s,closed){
+  const c=calc(s),d=s.date.split('-').reverse().join('.');
+  return `<h1>Отчёт за ${d}</h1>
+  ${c.ms.map(m=>`<div class="card"><div class="big">${esc(m.name)}</div>
+   ${m.vs.map(v=>`<div class="v"><div>${v.time} · ${esc(v.client||'Клиент')}<div class="mut">${v.service} · ${pl(v.pay)}</div></div><b>${money(v.amount)}</b></div>`).join('')||'<div class="mut">Нет клиентов</div>'}
+   <div class="tot"><span>Итого за день</span><span>${money(m.total)}</span></div></div>`).join('')}
+  <h2>Зарплата</h2><div class="card">
+   ${c.ms.map(m=>`<div class="v"><div><b>${esc(m.name)}</b><div class="mut">От ${money(m.total)}</div></div><b class="ok">${money(m.salary)}</b></div>`).join('')}
+   <div class="v"><div><b>Администратор</b><div class="mut">${money(ADMIN_FIX)} + 5% от ${money(c.salon)}</div></div><b class="ok">${money(c.admin)}</b></div>
+   <div class="tot"><span>Выручка за день</span><span>${money(c.total)}</span></div>
+   <div class="v"><span class="mut">Наличные (в кассе)</span><span>${money(c.cash)}</span></div>
+   <div class="v"><span class="mut">Безналичные (владельцу)</span><span>${money(c.cashless)}</span></div>
+   <div class="v"><span class="mut">Салону с мастеров</span><span>${money(c.salon)}</span></div>
+   <div class="v"><span class="mut">Владельцу после админа</span><span>${money(c.owner)}</span></div></div>
+  <div class="noprint"><button onclick="copyText()">Скопировать текстом</button><button class="sec" onclick="window.print()">Печать / сохранить в PDF</button>
+  <button class="sec" onclick="shift?view='shift':(view='setup',setupNames=['','']);render()">${closed?'Новая смена':'Назад'}</button></div>`;
+}
+function textReport(s){
+  const c=calc(s);let t='ОТЧЁТ ЗА '+s.date.split('-').reverse().join('.')+'\n';
+  c.ms.forEach(m=>{t+='\n'+m.name+'\n'+m.vs.map(v=>`  ${v.time} ${v.client||'Клиент'} (${v.service}, ${pl(v.pay)}) — ${money(v.amount)}`).join('\n')+'\n  Итого: '+money(m.total)+'\n'});
+  t+='\nЗАРПЛАТА\n'+c.ms.map(m=>`${m.name}: ${money(m.salary)}`).join('\n');
+  return t+`\nАдминистратор: ${money(c.admin)}\nВыручка: ${money(c.total)} (наличные ${money(c.cash)}, безналичные ${money(c.cashless)})`;
+}
+function copyText(){navigator.clipboard?.writeText(textReport(reportOf)).then(()=>alert('Скопировано'),()=>alert(textReport(reportOf)))}
+function historyHTML(){
+  return `<h1>История смен</h1><div class="card">${history.map((s,i)=>`<div class="v" onclick="reportOf=history[${i}];view='report';render()" style="cursor:pointer"><span>${s.date.split('-').reverse().join('.')}</span><span>${money(calc(s).total)} ›</span></div>`).join('')}</div>
+  <button class="sec" onclick="view=shift?'shift':'setup';render()">Назад</button>`;
+}
+render();
+</script></body></html>
