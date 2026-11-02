@@ -21,7 +21,7 @@ button{font:inherit;border:1px solid var(--gold);border-radius:12px;padding:13px
 button.sec{background:var(--ac2);color:var(--sect)}button.sm{width:auto;padding:6px 10px;margin:0;font-size:14px}
 .row{display:flex;gap:8px}.row>*{flex:1}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
-.chip{flex:1;text-align:center;padding:11px 6px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);cursor:pointer;font-size:15px;min-width:90px}
+.chip{flex:1 1 40%;min-width:0;text-align:center;padding:11px 6px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);cursor:pointer;font-size:15px;overflow-wrap:anywhere}
 .chip.on{background:var(--ac);color:var(--onac);border-color:var(--gold);font-weight:600}
 .v{display:flex;justify-content:space-between;gap:8px;padding:9px 0;border-top:1px solid var(--bd);font-size:15px}
 .v:first-child{border-top:0}.mut{color:var(--mut);font-size:13px}
@@ -29,33 +29,40 @@ button.sec{background:var(--ac2);color:var(--sect)}button.sm{width:auto;padding:
 .tot{display:flex;justify-content:space-between;font-weight:700;padding-top:8px;border-top:2px solid var(--gold);margin-top:6px}
 .ok{color:var(--ok)}a{color:var(--gold)}
 .nav{display:flex;gap:8px}.nav button{margin-top:12px}
+input[type=checkbox]{width:22px;height:22px;padding:0;accent-color:var(--ac);flex:0 0 auto}
+.chk{display:flex;align-items:center;gap:10px;font-size:15px;color:var(--tx);margin:12px 0 4px}
 @media print{.noprint{display:none!important}body{background:#fff;color:#000}.card{border-color:#999;break-inside:avoid;box-shadow:none}}
 </style>
 </head>
 <body><main id="app"></main>
 <script>
 const CUR='₽', ADMIN_FIX=2500, ADMIN_PCT=0.05;
-const RATES={'Стрижка':0.5,'Маникюр':0.6,'Брови':0.4}; // доля мастера
+const RATES={'Стрижка':0.5,'Маникюр':0.6,'Брови':0.4,'Окрашивание':0.5}; // доля мастера
 const PAY={card:'Безналичная оплата',cash:'Наличные'};
-const pl=p=>p==='cash'?'Наличные':'Безналичная оплата';
+const pm=v=>v.pay==='cash'?'cash':(v.transfer||v.pay==='transfer')?'transfer':'card';
+const pl=v=>({cash:'Наличные',card:'Безналичная оплата',transfer:'Перевод'})[pm(v)];
+const num=n=>(Math.round(n*100)/100).toLocaleString('ru-RU');
+const ex=v=>(v.service==='Окрашивание'?' · краска '+money(v.paint||0):'')+(v.bonus?' · бонусы: '+num(v.bonus):'');
 const $=s=>document.querySelector(s);
 const money=n=>(Math.round(n*100)/100).toLocaleString('ru-RU')+' '+CUR;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}};
 const save=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
 let shift=load('shift',null), history=load('history',[]), view=shift?'shift':'setup';
-let form={service:'Стрижка',pay:'card'}, setupNames=['',''], reportOf=null;
+let fm={service:'Стрижка',pay:'card'}, setupNames=['',''], reportOf=null;
 
 function calc(s){
   const ms=s.masters.map(name=>{
     const vs=s.visits.filter(v=>v.master===name);
     const total=vs.reduce((a,v)=>a+v.amount,0);
-    const salary=vs.reduce((a,v)=>a+v.amount*RATES[v.service],0);
-        return {name,vs,total,salary,salon:total-salary};
+    const salary=vs.reduce((a,v)=>a+(v.amount-(v.paint||0))*RATES[v.service],0);
+    return {name,vs,total,salary,salon:total-salary};
   });
   const total=ms.reduce((a,m)=>a+m.total,0), salon=ms.reduce((a,m)=>a+m.salon,0);
-  const cash=s.visits.filter(v=>v.pay==='cash').reduce((a,v)=>a+v.amount,0);
-  return {ms,total,cash,cashless:total-cash,salon,admin:ADMIN_FIX+ADMIN_PCT*salon,owner:salon-(ADMIN_FIX+ADMIN_PCT*salon)};
+  const real=t=>s.visits.filter(v=>pm(v)===t).reduce((a,v)=>a+v.amount-(v.bonus||0),0);
+  const bonus=s.visits.reduce((a,v)=>a+(v.bonus||0),0), paint=s.visits.reduce((a,v)=>a+(v.paint||0),0);
+  const admin=ADMIN_FIX+ADMIN_PCT*salon;
+  return {ms,total,cash:real('cash'),card:real('card'),transfer:real('transfer'),bonus,paint,salon,admin,owner:salon-admin};
 }
 function nowTime(){return new Date().toTimeString().slice(0,5)}
 function render(){
@@ -76,28 +83,39 @@ function startShift(){
   const names=[...new Set(setupNames.map(s=>s.trim()).filter(Boolean))];
   if(!names.length)return alert('Укажите хотя бы одного мастера');
   shift={date:new Date().toISOString().slice(0,10),masters:names,visits:[]};
-  form={service:'Стрижка',pay:'card',master:names[0]};save('shift',shift);view='shift';render();
+  fm={service:'Стрижка',pay:'card',master:names[0]};save('shift',shift);view='shift';render();
 }
 function shiftHTML(){
-  if(!form.master||!shift.masters.includes(form.master))form.master=shift.masters[0];
+  if(!fm.master||!shift.masters.includes(fm.master))fm.master=shift.masters[0];
   const c=calc(shift);
   return `<h1>Смена ${shift.date.split('-').reverse().join('.')}</h1>
-  <div class="card"><div class="mut">Мастер</div><div class="chips">${shift.masters.map(m=>`<div class="chip ${form.master===m?'on':''}" onclick="form.master='${esc(m).replace(/'/g,"\\'")}';keep();render()">${esc(m)}</div>`).join('')}</div>
-  <label>Услуга</label><div class="chips">${Object.keys(RATES).map(s=>`<div class="chip ${form.service===s?'on':''}" onclick="form.service='${s}';keep();render()">${s}</div>`).join('')}</div>
-  <div class="row"><div><label>Клиент</label><input id="cl" placeholder="Имя" value="${esc(form.client||'')}"></div><div><label>Время</label><input id="tm" type="time" value="${form.time||nowTime()}"></div></div>
-  <label>Сумма, ${CUR}</label><input id="am" type="number" inputmode="decimal" placeholder="0" value="${form.amount||''}">
-  <label>Способ оплаты</label><div class="chips">${Object.entries(PAY).map(([k,v])=>`<div class="chip ${form.pay===k?'on':''}" onclick="form.pay='${k}';keep();render()">${v}</div>`).join('')}</div>
+  <div class="card"><div class="mut">Мастер</div><div class="chips">${shift.masters.map(m=>`<div class="chip ${fm.master===m?'on':''}" onclick="fm.master='${esc(m).replace(/'/g,"\\'")}';keep();render()">${esc(m)}</div>`).join('')}</div>
+  <label>Услуга</label><div class="chips">${Object.keys(RATES).map(s=>`<div class="chip ${fm.service===s?'on':''}" onclick="fm.service='${s}';keep();render()">${s}</div>`).join('')}</div>
+  <div class="row"><div><label>Клиент</label><input id="cl" placeholder="Имя" value="${esc(fm.client||'')}"></div><div><label>Время</label><input id="tm" type="time" value="${fm.time||nowTime()}"></div></div>
+  <label>Сумма, ${CUR}${fm.service==='Окрашивание'?' (полная стоимость, с краской)':''}</label><input id="am" type="number" inputmode="decimal" placeholder="0" value="${fm.amount||''}">
+  ${fm.service==='Окрашивание'?`<label>Расход на краску, ${CUR}</label><input id="pa" type="number" inputmode="decimal" placeholder="0" value="${fm.paint||''}">`:''}
+  <label class="chk"><input type="checkbox" ${fm.useBonus?'checked':''} onchange="keep();fm.useBonus=this.checked;if(!this.checked)fm.bonus='';render()"> Бонусы</label>
+  ${fm.useBonus?`<label>Использовано бонусов</label><input id="bo" type="number" inputmode="decimal" placeholder="0" value="${fm.bonus||''}">`:''}
+  <label>Способ оплаты</label><div class="chips">${Object.entries(PAY).map(([k,v])=>`<div class="chip ${fm.pay===k?'on':''}" onclick="fm.pay='${k}';if(fm.pay==='cash')fm.transfer=false;keep();render()">${v}</div>`).join('')}</div>
+  ${fm.pay==='card'?`<label class="chk"><input type="checkbox" ${fm.transfer?'checked':''} onchange="fm.transfer=this.checked"> Перевод</label>`:''}
   <button onclick="addVisit()">Добавить запись</button></div>
   <h2>Записи за смену (${shift.visits.length}) · ${money(c.total)}</h2>
-  <div class="card">${shift.visits.length?[...shift.visits].reverse().map(v=>`<div class="v"><div><b>${esc(v.client||'Клиент')}</b> · ${esc(v.master)}<div class="mut">${v.time} · ${v.service} · ${pl(v.pay)}</div></div><div style="text-align:right"><b>${money(v.amount)}</b><br><a class="mut" href="#" onclick="delVisit(${v.id});return false">удалить</a></div></div>`).join(''):'<div class="mut">Пока пусто</div>'}</div>
+  <div class="card">${shift.visits.length?[...shift.visits].reverse().map(v=>`<div class="v"><div><b>${esc(v.client||'Клиент')}</b> · ${esc(v.master)}<div class="mut">${v.time} · ${v.service} · ${pl(v)}${ex(v)}</div></div><div style="text-align:right"><b>${money(v.amount)}</b><br><a class="mut" href="#" onclick="delVisit(${v.id});return false">удалить</a></div></div>`).join(''):'<div class="mut">Пока пусто</div>'}</div>
   <div class="nav"><button class="sec" onclick="addMaster()">+ Мастер</button><button onclick="finish()">Завершить смену</button></div>`;
 }
-function keep(){const g=id=>document.getElementById(id);if(g('cl')){form.client=g('cl').value;form.time=g('tm').value;form.amount=g('am').value}}
+function keep(){const g=id=>document.getElementById(id);if(g('cl')){fm.client=g('cl').value;fm.time=g('tm').value;fm.amount=g('am').value}if(g('pa'))fm.paint=g('pa').value;if(g('bo'))fm.bonus=g('bo').value;}
 function addVisit(){
-  keep();const amount=parseFloat(String(form.amount).replace(',','.'));
+  keep();const n=x=>parseFloat(String(x||'').replace(',','.'))||0;
+  const amount=n(fm.amount);
   if(!(amount>0))return alert('Укажите сумму');
-  shift.visits.push({id:Date.now(),master:form.master,client:(form.client||'').trim(),time:form.time||nowTime(),service:form.service,amount,pay:form.pay});
-  form.client='';form.amount='';form.time='';save('shift',shift);render();
+  let paint=0,bonus=0;
+  if(fm.service==='Окрашивание'){
+    if(String(fm.paint??'').trim()==='')return alert('Укажите расход на краску (0, если краски нет)');
+    paint=n(fm.paint);if(paint>=amount)return alert('Расход на краску должен быть меньше суммы');
+  }
+  if(fm.useBonus){bonus=n(fm.bonus);if(!(bonus>0))return alert('Укажите количество бонусов');if(bonus>amount)return alert('Бонусов больше суммы услуги')}
+  shift.visits.push({id:Date.now(),master:fm.master,client:(fm.client||'').trim(),time:fm.time||nowTime(),service:fm.service,amount,paint,bonus,pay:fm.pay,transfer:fm.pay==='card'&&!!fm.transfer});
+  fm.client='';fm.amount='';fm.time='';fm.paint='';fm.bonus='';fm.useBonus=false;fm.transfer=false;save('shift',shift);render();
 }
 function delVisit(id){if(confirm('Удалить запись?')){shift.visits=shift.visits.filter(v=>v.id!==id);save('shift',shift);render()}}
 function addMaster(){const n=(prompt('Имя мастера')||'').trim();if(n&&!shift.masters.includes(n)){shift.masters.push(n);save('shift',shift);render()}}
@@ -111,24 +129,27 @@ function reportHTML(s,closed){
   const c=calc(s),d=s.date.split('-').reverse().join('.');
   return `<h1>Отчёт за ${d}</h1>
   ${c.ms.map(m=>`<div class="card"><div class="big">${esc(m.name)}</div>
-   ${m.vs.map(v=>`<div class="v"><div>${v.time} · ${esc(v.client||'Клиент')}<div class="mut">${v.service} · ${pl(v.pay)}</div></div><b>${money(v.amount)}</b></div>`).join('')||'<div class="mut">Нет клиентов</div>'}
+   ${m.vs.map(v=>`<div class="v"><div>${v.time} · ${esc(v.client||'Клиент')}<div class="mut">${v.service} · ${pl(v)}${ex(v)}</div></div><b>${money(v.amount)}</b></div>`).join('')||'<div class="mut">Нет клиентов</div>'}
    <div class="tot"><span>Итого за день</span><span>${money(m.total)}</span></div></div>`).join('')}
   <h2>Зарплата</h2><div class="card">
    ${c.ms.map(m=>`<div class="v"><div><b>${esc(m.name)}</b><div class="mut">От ${money(m.total)}</div></div><b class="ok">${money(m.salary)}</b></div>`).join('')}
    <div class="v"><div><b>Администратор</b><div class="mut">${money(ADMIN_FIX)} + 5% от ${money(c.salon)}</div></div><b class="ok">${money(c.admin)}</b></div>
    <div class="tot"><span>Выручка за день</span><span>${money(c.total)}</span></div>
-   <div class="v"><span class="mut">Наличные (в кассе)</span><span>${money(c.cash)}</span></div>
-   <div class="v"><span class="mut">Безналичные (владельцу)</span><span>${money(c.cashless)}</span></div>
+   <div class="v"><span class="mut">Наличные</span><span>${money(c.cash)}</span></div>
+   <div class="v"><span class="mut">Безналичные</span><span>${money(c.card)}</span></div>
+   <div class="v"><span class="mut">Переводом</span><span>${money(c.transfer)}</span></div>
+   <div class="v"><span class="mut">Использовано бонусов</span><span>${num(c.bonus)}</span></div>
    <div class="v"><span class="mut">Салону с мастеров</span><span>${money(c.salon)}</span></div>
+   ${c.paint?`<div class="v"><span class="mut">Расход на краску</span><span>${money(c.paint)}</span></div>`:''}
    <div class="v"><span class="mut">Владельцу после админа</span><span>${money(c.owner)}</span></div></div>
   <div class="noprint"><button onclick="copyText()">Скопировать текстом</button><button class="sec" onclick="window.print()">Печать / сохранить в PDF</button>
   <button class="sec" onclick="shift?view='shift':(view='setup',setupNames=['','']);render()">${closed?'Новая смена':'Назад'}</button></div>`;
 }
 function textReport(s){
   const c=calc(s);let t='ОТЧЁТ ЗА '+s.date.split('-').reverse().join('.')+'\n';
-  c.ms.forEach(m=>{t+='\n'+m.name+'\n'+m.vs.map(v=>`  ${v.time} ${v.client||'Клиент'} (${v.service}, ${pl(v.pay)}) — ${money(v.amount)}`).join('\n')+'\n  Итого: '+money(m.total)+'\n'});
+  c.ms.forEach(m=>{t+='\n'+m.name+'\n'+m.vs.map(v=>`  ${v.time} ${v.client||'Клиент'} (${v.service}, ${pl(v)}${ex(v)}) — ${money(v.amount)}`).join('\n')+'\n  Итого: '+money(m.total)+'\n'});
   t+='\nЗАРПЛАТА\n'+c.ms.map(m=>`${m.name}: ${money(m.salary)}`).join('\n');
-  return t+`\nАдминистратор: ${money(c.admin)}\nВыручка: ${money(c.total)} (наличные ${money(c.cash)}, безналичные ${money(c.cashless)})`;
+  return t+`\nАдминистратор: ${money(c.admin)}\nВыручка за день: ${money(c.total)}\nНаличные: ${money(c.cash)}\nБезналичные: ${money(c.card)}\nПереводом: ${money(c.transfer)}\nИспользовано бонусов: ${num(c.bonus)}`;
 }
 function copyText(){navigator.clipboard?.writeText(textReport(reportOf)).then(()=>alert('Скопировано'),()=>alert(textReport(reportOf)))}
 function historyHTML(){
