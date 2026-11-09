@@ -43,20 +43,24 @@ const pm=v=>v.pay==='cash'?'cash':(v.transfer||v.pay==='transfer')?'transfer':'c
 const pl=v=>({cash:'Наличные',card:'Безналичная оплата',transfer:'Перевод'})[pm(v)];
 const num=n=>(Math.round(n*100)/100).toLocaleString('ru-RU');
 const ex=v=>(v.service==='Окрашивание'?' · краска '+money(v.paint||0):'')+(v.bonus?' · бонусы: '+num(v.bonus):'');
+const MASTERS={'Алина':['Маникюр'],'Виктория':['Маникюр'],'Кристина':['Стрижка','Окрашивание'],'Маша':['Стрижка','Окрашивание'],'Наталья':['Брови']};
+const ROSTER=Object.keys(MASTERS), svcFor=n=>MASTERS[n]||Object.keys(RATES);
+const sn=s=>s==='Маникюр'?'Маникюр/педикюр':s;
 const $=s=>document.querySelector(s);
 const money=n=>(Math.round(n*100)/100).toLocaleString('ru-RU')+' '+CUR;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}};
 const save=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
 let shift=load('shift',null), history=load('history',[]), view=shift?'shift':'setup';
-let fm={service:'Стрижка',pay:'card'}, setupNames=['',''], reportOf=null;
+let fm={service:'Стрижка',pay:'card'}, setupSel=[], setupCustom=[], showAdd=false, reportOf=null;
 
 function calc(s){
   const ms=s.masters.map(name=>{
     const vs=s.visits.filter(v=>v.master===name);
     const total=vs.reduce((a,v)=>a+v.amount,0);
+    const base=vs.reduce((a,v)=>a+v.amount-(v.paint||0),0); // сумма без краски
     const salary=vs.reduce((a,v)=>a+(v.amount-(v.paint||0))*RATES[v.service],0);
-    return {name,vs,total,salary,salon:total-salary};
+    return {name,vs,total,base,salary,salon:base-salary};
   });
   const total=ms.reduce((a,m)=>a+m.total,0), salon=ms.reduce((a,m)=>a+m.salon,0);
   const real=t=>s.visits.filter(v=>pm(v)===t).reduce((a,v)=>a+v.amount-(v.bonus||0),0);
@@ -72,25 +76,29 @@ function render(){
   else if(view==='report')a.innerHTML=reportHTML(reportOf,reportOf.closed);
   else a.innerHTML=historyHTML();
 }
+const pool=()=>[...ROSTER,...setupCustom];
 function setupHTML(){
-  return `<h1>Новая смена</h1><div class="card"><div class="mut">Имена мастеров, работающих сегодня</div>
-  ${setupNames.map((n,i)=>`<label>Мастер ${i+1}</label><div class="row"><input value="${esc(n)}" oninput="setupNames[${i}]=this.value" placeholder="Имя">${setupNames.length>1?`<button class="sec sm" style="flex:0 0 auto" onclick="setupNames.splice(${i},1);render()">✕</button>`:''}</div>`).join('')}
-  <button class="sec" onclick="setupNames.push('');render()">+ Добавить мастера</button></div>
+  return `<h1>Новая смена</h1><div class="card"><div class="mut">Кто работает сегодня</div>
+  <div class="chips" style="margin-top:8px">${pool().map((n,i)=>`<div class="chip ${setupSel.includes(n)?'on':''}" onclick="togSetup(${i})">${esc(n)}</div>`).join('')}</div>
+  <button class="sec" onclick="addCustom()">+ Другой мастер</button></div>
   <button onclick="startShift()">Начать смену</button>
   ${history.length?`<button class="sec" onclick="view='history';render()">История смен</button>`:''}`;
 }
+function togSetup(i){const n=pool()[i];setupSel=setupSel.includes(n)?setupSel.filter(x=>x!==n):[...setupSel,n];render()}
+function addCustom(){const n=(prompt('Имя мастера')||'').trim();if(!n)return;if(!pool().includes(n))setupCustom.push(n);if(!setupSel.includes(n))setupSel.push(n);render()}
 function startShift(){
-  const names=[...new Set(setupNames.map(s=>s.trim()).filter(Boolean))];
-  if(!names.length)return alert('Укажите хотя бы одного мастера');
+  const names=pool().filter(n=>setupSel.includes(n));
+  if(!names.length)return alert('Выберите хотя бы одного мастера');
   shift={date:new Date().toISOString().slice(0,10),masters:names,visits:[]};
-  fm={service:'Стрижка',pay:'card',master:names[0]};save('shift',shift);view='shift';render();
+  fm={service:svcFor(names[0])[0],pay:'card',master:names[0]};showAdd=false;save('shift',shift);view='shift';render();
 }
 function shiftHTML(){
   if(!fm.master||!shift.masters.includes(fm.master))fm.master=shift.masters[0];
+  const sv=svcFor(fm.master);if(!sv.includes(fm.service))fm.service=sv[0];
   const c=calc(shift);
   return `<h1>Смена ${shift.date.split('-').reverse().join('.')}</h1>
-  <div class="card"><div class="mut">Мастер</div><div class="chips">${shift.masters.map(m=>`<div class="chip ${fm.master===m?'on':''}" onclick="fm.master='${esc(m).replace(/'/g,"\\'")}';keep();render()">${esc(m)}</div>`).join('')}</div>
-  <label>Услуга</label><div class="chips">${Object.keys(RATES).map(s=>`<div class="chip ${fm.service===s?'on':''}" onclick="fm.service='${s}';keep();render()">${s}</div>`).join('')}</div>
+  <div class="card"><div class="mut">Мастер</div><div class="chips">${shift.masters.map((m,i)=>`<div class="chip ${fm.master===m?'on':''}" onclick="selMaster(${i})">${esc(m)}</div>`).join('')}</div>
+  ${sv.length>1?`<label>Услуга</label><div class="chips">${sv.map(x=>`<div class="chip ${fm.service===x?'on':''}" onclick="fm.service='${x}';keep();render()">${x}</div>`).join('')}</div>`:`<div class="mut" style="margin-top:8px">Услуга: ${sn(fm.service)}</div>`}
   <div class="row"><div><label>Клиент</label><input id="cl" placeholder="Имя" value="${esc(fm.client||'')}"></div><div><label>Время</label><input id="tm" type="time" value="${fm.time||nowTime()}"></div></div>
   <label>Сумма, ${CUR}${fm.service==='Окрашивание'?' (полная стоимость, с краской)':''}</label><input id="am" type="number" inputmode="decimal" placeholder="0" value="${fm.amount||''}">
   ${fm.service==='Окрашивание'?`<label>Расход на краску, ${CUR}</label><input id="pa" type="number" inputmode="decimal" placeholder="0" value="${fm.paint||''}">`:''}
@@ -100,8 +108,9 @@ function shiftHTML(){
   ${fm.pay==='card'?`<label class="chk"><input type="checkbox" ${fm.transfer?'checked':''} onchange="fm.transfer=this.checked"> Перевод</label>`:''}
   <button onclick="addVisit()">Добавить запись</button></div>
   <h2>Записи за смену (${shift.visits.length}) · ${money(c.total)}</h2>
-  <div class="card">${shift.visits.length?[...shift.visits].reverse().map(v=>`<div class="v"><div><b>${esc(v.client||'Клиент')}</b> · ${esc(v.master)}<div class="mut">${v.time} · ${v.service} · ${pl(v)}${ex(v)}</div></div><div style="text-align:right"><b>${money(v.amount)}</b><br><a class="mut" href="#" onclick="delVisit(${v.id});return false">удалить</a></div></div>`).join(''):'<div class="mut">Пока пусто</div>'}</div>
-  <div class="nav"><button class="sec" onclick="addMaster()">+ Мастер</button><button onclick="finish()">Завершить смену</button></div>`;
+  <div class="card">${shift.visits.length?[...shift.visits].reverse().map(v=>`<div class="v"><div><b>${esc(v.client||'Клиент')}</b> · ${esc(v.master)}<div class="mut">${v.time} · ${sn(v.service)} · ${pl(v)}${ex(v)}</div></div><div style="text-align:right"><b>${money(v.amount)}</b><br><a class="mut" href="#" onclick="delVisit(${v.id});return false">удалить</a></div></div>`).join(''):'<div class="mut">Пока пусто</div>'}</div>
+  ${showAdd?`<div class="card"><div class="mut">Добавить мастера в смену</div><div class="chips" style="margin-top:8px">${ROSTER.filter(n=>!shift.masters.includes(n)).map(n=>`<div class="chip" onclick="addM(${ROSTER.indexOf(n)})">${n}</div>`).join('')}<div class="chip" onclick="addMaster()">Другой…</div></div></div>`:''}
+  <div class="nav"><button class="sec" onclick="showAdd=!showAdd;render()">+ Мастер</button><button onclick="finish()">Завершить смену</button></div>`;
 }
 function keep(){const g=id=>document.getElementById(id);if(g('cl')){fm.client=g('cl').value;fm.time=g('tm').value;fm.amount=g('am').value}if(g('pa'))fm.paint=g('pa').value;if(g('bo'))fm.bonus=g('bo').value;}
 function addVisit(){
@@ -118,7 +127,9 @@ function addVisit(){
   fm.client='';fm.amount='';fm.time='';fm.paint='';fm.bonus='';fm.useBonus=false;fm.transfer=false;save('shift',shift);render();
 }
 function delVisit(id){if(confirm('Удалить запись?')){shift.visits=shift.visits.filter(v=>v.id!==id);save('shift',shift);render()}}
-function addMaster(){const n=(prompt('Имя мастера')||'').trim();if(n&&!shift.masters.includes(n)){shift.masters.push(n);save('shift',shift);render()}}
+function selMaster(i){keep();fm.master=shift.masters[i];render()}
+function addM(i){const n=ROSTER[i];if(!shift.masters.includes(n)){shift.masters.push(n);save('shift',shift)}showAdd=false;render()}
+function addMaster(){const n=(prompt('Имя мастера')||'').trim();if(n&&!shift.masters.includes(n)){shift.masters.push(n);save('shift',shift)}showAdd=false;render()}
 function finish(){
   if(!shift.visits.length&&!confirm('Записей нет. Завершить смену?'))return;
   shift.masters=shift.masters.filter(m=>shift.visits.some(v=>v.master===m)||confirm('У мастера «'+m+'» нет записей. Оставить в отчёте?'));
@@ -129,7 +140,7 @@ function reportHTML(s,closed){
   const c=calc(s),d=s.date.split('-').reverse().join('.');
   return `<h1>Отчёт за ${d}</h1>
   ${c.ms.map(m=>`<div class="card"><div class="big">${esc(m.name)}</div>
-   ${m.vs.map(v=>`<div class="v"><div>${v.time} · ${esc(v.client||'Клиент')}<div class="mut">${v.service} · ${pl(v)}${ex(v)}</div></div><b>${money(v.amount)}</b></div>`).join('')||'<div class="mut">Нет клиентов</div>'}
+   ${m.vs.map(v=>`<div class="v"><div>${v.time} · ${esc(v.client||'Клиент')}<div class="mut">${sn(v.service)} · ${pl(v)}${ex(v)}</div></div><b>${money(v.amount)}</b></div>`).join('')||'<div class="mut">Нет клиентов</div>'}
    <div class="tot"><span>Итого за день</span><span>${money(m.total)}</span></div></div>`).join('')}
   <h2>Зарплата</h2><div class="card">
    ${c.ms.map(m=>`<div class="v"><div><b>${esc(m.name)}</b><div class="mut">От ${money(m.total)}</div></div><b class="ok">${money(m.salary)}</b></div>`).join('')}
@@ -143,11 +154,11 @@ function reportHTML(s,closed){
    ${c.paint?`<div class="v"><span class="mut">Расход на краску</span><span>${money(c.paint)}</span></div>`:''}
    <div class="v"><span class="mut">Владельцу после админа</span><span>${money(c.owner)}</span></div></div>
   <div class="noprint"><button onclick="copyText()">Скопировать текстом</button><button class="sec" onclick="window.print()">Печать / сохранить в PDF</button>
-  <button class="sec" onclick="shift?view='shift':(view='setup',setupNames=['','']);render()">${closed?'Новая смена':'Назад'}</button></div>`;
+  <button class="sec" onclick="shift?view='shift':(view='setup',setupSel=[]);render()">${closed?'Новая смена':'Назад'}</button></div>`;
 }
 function textReport(s){
   const c=calc(s);let t='ОТЧЁТ ЗА '+s.date.split('-').reverse().join('.')+'\n';
-  c.ms.forEach(m=>{t+='\n'+m.name+'\n'+m.vs.map(v=>`  ${v.time} ${v.client||'Клиент'} (${v.service}, ${pl(v)}${ex(v)}) — ${money(v.amount)}`).join('\n')+'\n  Итого: '+money(m.total)+'\n'});
+  c.ms.forEach(m=>{t+='\n'+m.name+'\n'+m.vs.map(v=>`  ${v.time} ${v.client||'Клиент'} (${sn(v.service)}, ${pl(v)}${ex(v)}) — ${money(v.amount)}`).join('\n')+'\n  Итого: '+money(m.total)+'\n'});
   t+='\nЗАРПЛАТА\n'+c.ms.map(m=>`${m.name}: ${money(m.salary)}`).join('\n');
   return t+`\nАдминистратор: ${money(c.admin)}\nВыручка за день: ${money(c.total)}\nНаличные: ${money(c.cash)}\nБезналичные: ${money(c.card)}\nПереводом: ${money(c.transfer)}\nИспользовано бонусов: ${num(c.bonus)}`;
 }
